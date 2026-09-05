@@ -1,11 +1,12 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SavedAnalysisRecord } from '../types';
-import { Bookmark, X, Calendar, ArrowRight, Trash2, Download, CheckCircle2, Briefcase } from 'lucide-react';
+import { SavedAnalysisRecord, UserProfile } from '../types';
+import { Bookmark, X, Calendar, ArrowRight, Trash2, Download, CheckCircle2, Briefcase, User } from 'lucide-react';
 
 interface SavedAnalysesModalProps {
   isOpen: boolean;
   savedList: SavedAnalysisRecord[];
+  user?: UserProfile | null;
   onClose: () => void;
   onLoadRecord: (record: SavedAnalysisRecord) => void;
   onDeleteRecord: (id: string) => void;
@@ -15,6 +16,7 @@ interface SavedAnalysesModalProps {
 export const SavedAnalysesModal: React.FC<SavedAnalysesModalProps> = ({
   isOpen,
   savedList,
+  user,
   onClose,
   onLoadRecord,
   onDeleteRecord,
@@ -64,8 +66,23 @@ export const SavedAnalysesModal: React.FC<SavedAnalysesModalProps> = ({
                   >
                     Saved SkillGap Analyses
                   </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    {savedList.length} saved {savedList.length === 1 ? 'record' : 'records'} stored locally on this device
+                  <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 flex-wrap">
+                    {user ? (
+                      <>
+                        <span className="inline-flex items-center gap-1 text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
+                          <User className="w-3 h-3 text-indigo-600" />
+                          {user.name} ({user.email})
+                        </span>
+                        <span>•</span>
+                        <span>
+                          {savedList.length} saved {savedList.length === 1 ? 'record' : 'records'} in this account
+                        </span>
+                      </>
+                    ) : (
+                      <span>
+                        {savedList.length} saved {savedList.length === 1 ? 'record' : 'records'} stored locally
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -76,7 +93,7 @@ export const SavedAnalysesModal: React.FC<SavedAnalysesModalProps> = ({
                     type="button"
                     onClick={onClearAll}
                     className="px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-semibold transition-colors cursor-pointer"
-                    title="Clear all saved analyses"
+                    title="Clear saved analyses for this account"
                   >
                     Clear All
                   </button>
@@ -99,9 +116,17 @@ export const SavedAnalysesModal: React.FC<SavedAnalysesModalProps> = ({
                   <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-3">
                     <Bookmark className="w-8 h-8 stroke-[1.5]" />
                   </div>
-                  <h4 className="text-base font-bold text-slate-700">No Saved Analyses Yet</h4>
+                  <h4 className="text-base font-bold text-slate-700">No Saved Analyses for This Account</h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 leading-relaxed">
-                    Run an analysis on any job role and click the <span className="font-semibold text-indigo-600">&ldquo;Save Analysis&rdquo;</span> button in the results to store your snapshot here.
+                    {user ? (
+                      <span>
+                        No saved reports found for <strong className="text-slate-700">{user.name}</strong> ({user.email}). Each account maintains its own private library. Run an analysis on any job role and click <span className="font-semibold text-indigo-600">&ldquo;Save Analysis&rdquo;</span> to store your snapshots here.
+                      </span>
+                    ) : (
+                      <span>
+                        Run an analysis on any job role and click the <span className="font-semibold text-indigo-600">&ldquo;Save Analysis&rdquo;</span> button in the results to store your snapshot here.
+                      </span>
+                    )}
                   </p>
                 </div>
               ) : (

@@ -24,6 +24,8 @@ export interface SkillGapAnalysis {
 
 export interface SavedAnalysisRecord {
   id: string;
+  userId?: string;
+  userEmail?: string;
   title: string;
   roleName: string;
   selectedJobId: string;
@@ -33,3 +35,15 @@ export interface SavedAnalysisRecord {
 }
 
 export type LearningProgressMap = Record<string, number>;
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  targetRole?: string;
+  createdAt: string;
+}
+
+export type AuthModalMode = 'login' | 'register' | null;
+
+export type ActiveAppView = 'home' | 'app';

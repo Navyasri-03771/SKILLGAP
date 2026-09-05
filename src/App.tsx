@@ -6,6 +6,8 @@ import { Results } from './components/Results';
 import { Footer } from './components/Footer';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { SavedAnalysesModal } from './components/SavedAnalysesModal';
+import { LandingPage } from './components/LandingPage';
+import { AuthModal } from './components/AuthModal';
 import { JOB_ROLES, ALL_PREDEFINED_SKILLS } from './data/jobRoles';
 import { runSkillGapAnalysis } from './utils/analyzer';
 import {
@@ -19,10 +21,38 @@ import {
   deleteSavedAnalysis,
   clearAllSavedAnalyses,
 } from './utils/storage';
-import { SkillGapAnalysis, LearningProgressMap, SavedAnalysisRecord } from './types';
-import { CheckCircle2, AlertCircle, X, BookmarkCheck } from 'lucide-react';
+import {
+  getCurrentUser,
+  logoutUser,
+  loginDemoUser,
+} from './utils/authStorage';
+import {
+  SkillGapAnalysis,
+  LearningProgressMap,
+  SavedAnalysisRecord,
+  UserProfile,
+  AuthModalMode,
+  ActiveAppView,
+} from './types';
+import {
+  CheckCircle2,
+  AlertCircle,
+  X,
+  BookmarkCheck,
+  User,
+  Sparkles,
+  ArrowRight,
+  ShieldCheck,
+  Zap,
+} from 'lucide-react';
 
 export default function App() {
+  // Auth & View State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [activeView, setActiveView] = useState<ActiveAppView>('home');
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>(null);
+
+  // Application Analyzer State
   const [selectedJobId, setSelectedJobId] = useState<string>('');
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [analysis, setAnalysis] = useState<SkillGapAnalysis | null>(null);
@@ -37,30 +67,51 @@ export default function App() {
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysisRecord[]>([]);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
-  // Load saved analysis & progress & saved records from LocalStorage on mount
-  useEffect(() => {
-    const { data: savedAnalysis, corrupted } = loadAnalysisFromStorage();
-    const savedProgress = loadProgressFromStorage();
-    const records = getSavedAnalyses();
-    setProgressMap(savedProgress);
+  // Load user data (scoped by account ID to ensure complete account separation)
+  const loadUserData = (user: UserProfile | null) => {
+    const userId = user?.id;
+    const records = getSavedAnalyses(userId);
     setSavedAnalyses(records);
+
+    const { data: savedAnalysis, corrupted } = loadAnalysisFromStorage(userId);
+    const savedProgress = loadProgressFromStorage(userId);
+    setProgressMap(savedProgress);
+
+    if (savedAnalysis) {
+      setAnalysis(savedAnalysis);
+      setSelectedJobId(savedAnalysis.selectedJobId);
+      setSelectedSkills(savedAnalysis.selectedSkills);
+    } else {
+      setAnalysis(null);
+      setSelectedSkills([]);
+      if (user?.targetRole) {
+        const matched = JOB_ROLES.find(
+          (r) => r.name.toLowerCase() === user.targetRole?.toLowerCase()
+        );
+        setSelectedJobId(matched ? matched.id : '');
+      } else {
+        setSelectedJobId('');
+      }
+    }
 
     if (corrupted) {
       setRestoreNotification({
         message: 'Saved analysis could not be restored. Starting a new analysis.',
         type: 'warning',
       });
-      return;
     }
+  };
 
-    if (savedAnalysis) {
-      setAnalysis(savedAnalysis);
-      setSelectedJobId(savedAnalysis.selectedJobId);
-      setSelectedSkills(savedAnalysis.selectedSkills);
-      setRestoreNotification({
-        message: 'Your latest analysis has been restored.',
-        type: 'success',
-      });
+  // On mount: check auth session & load user-specific saved analyses
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (user) {
+      setCurrentUser(user);
+      setActiveView('app'); // If already logged in, take straight to application
+      loadUserData(user);
+    } else {
+      setActiveView('home'); // If not logged in, show first home page
+      loadUserData(null);
     }
   }, []);
 
@@ -83,6 +134,37 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [saveToast]);
+
+  // Auth Handlers
+  const handleAuthSuccess = (user: UserProfile) => {
+    setCurrentUser(user);
+    setActiveView('app'); // Transition into Skill Analyzer
+    setAuthModalMode(null);
+    setSaveToast(`Welcome, ${user.name}! Your Skill Analyzer is ready.`);
+
+    // Load the specific user's saved records and analysis
+    loadUserData(user);
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setCurrentUser(null);
+    setActiveView('home');
+    setSaveToast('You have been signed out.');
+
+    // Clear state completely to prevent cross-account display
+    setSelectedJobId('');
+    setSelectedSkills([]);
+    setAnalysis(null);
+    setProgressMap({});
+    setSavedAnalyses([]);
+    setValidationError(null);
+  };
+
+  const handleQuickDemo = () => {
+    const demo = loginDemoUser();
+    handleAuthSuccess(demo);
+  };
 
   // Handle Target Job selection
   const handleSelectJob = (jobId: string) => {
@@ -118,7 +200,7 @@ export default function App() {
     setSelectedSkills([]);
   };
 
-  // Quick preset helper (e.g. Frontend Core, Python Core)
+  // Quick preset helper
   const handleQuickPreset = (presetSkills: string[]) => {
     setSelectedSkills(presetSkills);
     if (validationError) setValidationError(null);
@@ -154,8 +236,8 @@ export default function App() {
     const newAnalysis = runSkillGapAnalysis(job, selectedSkills);
     setAnalysis(newAnalysis);
 
-    // Persist in LocalStorage
-    saveAnalysisToStorage(newAnalysis);
+    // Persist in LocalStorage specifically for this user account
+    saveAnalysisToStorage(newAnalysis, currentUser?.id);
 
     // Smoothly scroll to results
     setTimeout(() => {
@@ -166,7 +248,7 @@ export default function App() {
     }, 100);
   };
 
-  // Save current analysis to library
+  // Save current analysis to library (tagged with currentUser.id)
   const handleSaveCurrentAnalysis = () => {
     if (!analysis) return;
     const currentJob = JOB_ROLES.find((r) => r.id === analysis.selectedJobId);
@@ -174,6 +256,8 @@ export default function App() {
 
     const record: SavedAnalysisRecord = {
       id: `record-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      userId: currentUser?.id,
+      userEmail: currentUser?.email,
       savedAt: new Date().toISOString(),
       selectedJobId: currentJob.id,
       roleName: currentJob.name,
@@ -182,9 +266,9 @@ export default function App() {
       progressMap,
     };
 
-    const updated = saveAnalysisRecord(record);
+    const updated = saveAnalysisRecord(record, currentUser?.id);
     setSavedAnalyses(updated);
-    setSaveToast(`Analysis saved for ${currentJob.name}! View it anytime under Saved.`);
+    setSaveToast(`Analysis saved to ${currentUser ? currentUser.name + "'s account" : 'your library'}!`);
   };
 
   // Load a saved record
@@ -194,9 +278,9 @@ export default function App() {
     setSelectedSkills(record.analysis.selectedSkills);
     setProgressMap(record.progressMap || {});
 
-    // Save as active analysis
-    saveAnalysisToStorage(record.analysis);
-    saveProgressToStorage(record.progressMap || {});
+    // Save as active analysis for this user
+    saveAnalysisToStorage(record.analysis, currentUser?.id);
+    saveProgressToStorage(record.progressMap || {}, currentUser?.id);
 
     setSaveToast(`Loaded saved analysis for ${record.roleName}.`);
 
@@ -210,13 +294,13 @@ export default function App() {
 
   // Delete individual record
   const handleDeleteSavedRecord = (id: string) => {
-    const updated = deleteSavedAnalysis(id);
+    const updated = deleteSavedAnalysis(id, currentUser?.id);
     setSavedAnalyses(updated);
   };
 
-  // Clear all saved records
+  // Clear all saved records for this account
   const handleClearAllSavedRecords = () => {
-    clearAllSavedAnalyses();
+    clearAllSavedAnalyses(currentUser?.id);
     setSavedAnalyses([]);
   };
 
@@ -231,15 +315,13 @@ export default function App() {
     };
 
     setProgressMap(updatedProgressMap);
-    saveProgressToStorage(updatedProgressMap);
+    saveProgressToStorage(updatedProgressMap, currentUser?.id);
   };
 
   // Feature 5: Reset Analysis workflow
   const handleConfirmReset = () => {
-    // Clear LocalStorage active session
-    clearSkillGapStorage();
+    clearSkillGapStorage(currentUser?.id);
 
-    // Reset component state
     setSelectedJobId('');
     setSelectedSkills([]);
     setAnalysis(null);
@@ -248,7 +330,6 @@ export default function App() {
     setIsResetModalOpen(false);
     setRestoreNotification(null);
 
-    // Scroll smoothly to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -266,19 +347,26 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Header */}
+      {/* Header with Login & Register buttons */}
       <Header
+        user={currentUser}
+        activeView={activeView}
         hasAnalysis={Boolean(analysis)}
         readinessPercentage={analysis?.readinessPercentage}
         selectedRoleName={currentJobRole?.name}
         savedCount={savedAnalyses.length}
+        onSelectView={(view) => setActiveView(view)}
+        onOpenLogin={() => setAuthModalMode('login')}
+        onOpenRegister={() => setAuthModalMode('register')}
+        onQuickDemo={handleQuickDemo}
+        onLogout={handleLogout}
         onOpenSaved={() => setIsSavedModalOpen(true)}
         onOpenReset={() => setIsResetModalOpen(true)}
         onNavigate={handleNavigate}
       />
 
-      {/* Restored from Storage or Corrupted Notification Banner */}
-      {restoreNotification && (
+      {/* Restored or Corrupted Notification Banner */}
+      {restoreNotification && activeView === 'app' && (
         <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-4 w-full">
           <div
             className={`p-3.5 rounded-xl border text-sm flex items-center justify-between shadow-xs transition-all ${
@@ -317,13 +405,15 @@ export default function App() {
           <div className="flex items-center gap-3 px-4 py-3 bg-slate-900 text-white rounded-2xl shadow-xl border border-slate-700 text-xs sm:text-sm font-semibold">
             <BookmarkCheck className="w-5 h-5 text-emerald-400 shrink-0" />
             <span>{saveToast}</span>
-            <button
-              type="button"
-              onClick={() => setIsSavedModalOpen(true)}
-              className="ml-2 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-            >
-              Open Library
-            </button>
+            {activeView === 'app' && (
+              <button
+                type="button"
+                onClick={() => setIsSavedModalOpen(true)}
+                className="ml-2 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Open Library
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSaveToast(null)}
@@ -336,45 +426,122 @@ export default function App() {
         </div>
       )}
 
-      {/* Hero Section */}
-      <Hero onStartAnalysis={() => handleNavigate('analyzer')} />
+      {/* MAIN VIEW CONTENT: Home vs Application */}
+      {activeView === 'home' ? (
+        /* FIRST HOME PAGE: Contains matter about application and features represent */
+        <div>
+          {/* If user is logged in, show top quick-access banner to jump to application */}
+          {currentUser && (
+            <div className="bg-indigo-50 border-b border-indigo-200/80 py-2.5 px-4">
+              <div className="max-w-6xl mx-auto flex items-center justify-between text-xs sm:text-sm">
+                <span className="text-indigo-900 font-medium flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Logged in as <strong>{currentUser.name}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveView('app')}
+                  className="font-bold text-indigo-700 hover:text-indigo-900 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Go to Skill Analyzer</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* Main Content Area */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full space-y-16">
-        {/* Analyzer Section (Features 1 & 2 & 3 Input) */}
-        <Analyzer
-          jobRoles={JOB_ROLES}
-          allSkills={ALL_PREDEFINED_SKILLS}
-          selectedJobId={selectedJobId}
-          selectedSkills={selectedSkills}
-          validationError={validationError}
-          onSelectJob={handleSelectJob}
-          onToggleSkill={handleToggleSkill}
-          onSelectAllSkills={handleSelectAllSkills}
-          onClearAllSkills={handleClearAllSkills}
-          onQuickPreset={handleQuickPreset}
-          onAnalyze={handleAnalyze}
-          onResetAll={handleClearAllSkills}
-        />
-
-        {/* Results Dashboard (Features 3 & 4) */}
-        {analysis && currentJobRole ? (
-          <Results
-            analysis={analysis}
-            jobRole={currentJobRole}
-            progressMap={progressMap}
-            onToggleLearned={handleToggleLearned}
-            onEditSkills={() => handleNavigate('analyzer')}
-            onSaveAnalysis={handleSaveCurrentAnalysis}
+          <LandingPage
+            onOpenRegister={() => setAuthModalMode('register')}
+            onOpenLogin={() => setAuthModalMode('login')}
+            onQuickDemo={handleQuickDemo}
           />
-        ) : (
-          <div className="text-center py-12 px-4 rounded-3xl border-2 border-dashed border-slate-200 bg-white/60 shadow-2xs">
-            <p className="text-slate-400 font-semibold text-sm">
-              Select your target job and skills above to see your customized SkillGap report.
-            </p>
+        </div>
+      ) : (
+        /* MY APPLICATION VIEW: Opened after login ("then after login open my application all this") */
+        <div>
+          {/* User Welcome Bar */}
+          <div className="bg-white border-b border-slate-200/80 py-4 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black shadow-sm text-sm">
+                  {currentUser?.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-extrabold text-slate-900">
+                      Welcome, {currentUser?.name || 'Developer'}!
+                    </h2>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <ShieldCheck className="w-3 h-3" />
+                      Active Session
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Target Track: <span className="font-semibold text-indigo-600">{currentUser?.targetRole || 'Software Engineering'}</span> • Analyze your skills below to track your readiness.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSavedModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Saved Analyses ({savedAnalyses.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveView('home')}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  View About & Features
+                </button>
+              </div>
+            </div>
           </div>
-        )}
-      </main>
+
+          {/* Hero Section */}
+          <Hero onStartAnalysis={() => handleNavigate('analyzer')} />
+
+          {/* Main Application Container */}
+          <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full space-y-16">
+            {/* Analyzer Section (Features 1 & 2 & 3 Input) */}
+            <Analyzer
+              jobRoles={JOB_ROLES}
+              allSkills={ALL_PREDEFINED_SKILLS}
+              selectedJobId={selectedJobId}
+              selectedSkills={selectedSkills}
+              validationError={validationError}
+              onSelectJob={handleSelectJob}
+              onToggleSkill={handleToggleSkill}
+              onSelectAllSkills={handleSelectAllSkills}
+              onClearAllSkills={handleClearAllSkills}
+              onQuickPreset={handleQuickPreset}
+              onAnalyze={handleAnalyze}
+              onResetAll={handleClearAllSkills}
+            />
+
+            {/* Results Dashboard (Features 3 & 4) */}
+            {analysis && currentJobRole ? (
+              <Results
+                analysis={analysis}
+                jobRole={currentJobRole}
+                progressMap={progressMap}
+                onToggleLearned={handleToggleLearned}
+                onEditSkills={() => handleNavigate('analyzer')}
+                onSaveAnalysis={handleSaveCurrentAnalysis}
+              />
+            ) : (
+              <div className="text-center py-12 px-4 rounded-3xl border-2 border-dashed border-slate-200 bg-white/60 shadow-2xs">
+                <p className="text-slate-400 font-semibold text-sm">
+                  Select your target job and skills above to see your customized SkillGap report.
+                </p>
+              </div>
+            )}
+          </main>
+        </div>
+      )}
 
       {/* Footer */}
       <Footer />
@@ -390,12 +557,22 @@ export default function App() {
       <SavedAnalysesModal
         isOpen={isSavedModalOpen}
         savedList={savedAnalyses}
+        user={currentUser}
         onClose={() => setIsSavedModalOpen(false)}
         onLoadRecord={handleLoadSavedRecord}
         onDeleteRecord={handleDeleteSavedRecord}
         onClearAll={handleClearAllSavedRecords}
       />
+
+      {/* Auth Modal (Login / Register) */}
+      <AuthModal
+        mode={authModalMode}
+        onClose={() => setAuthModalMode(null)}
+        onSuccess={handleAuthSuccess}
+        onSwitchMode={(mode) => setAuthModalMode(mode)}
+      />
     </div>
   );
 }
+
 
