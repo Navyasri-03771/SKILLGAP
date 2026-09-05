@@ -1,0 +1,6 @@
+{
+  "name": "SkillGap — Job Skill Gap Analyzer",
+  "description": "An educational employability platform for engineering students to analyze skill gaps against target jobs and prioritize what to learn next.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
