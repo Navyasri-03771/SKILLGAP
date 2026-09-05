@@ -15,7 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { UserProfile, AuthModalMode } from '../types';
-import { loginUser, registerUser, loginDemoUser } from '../utils/authStorage';
+import { loginUser, registerUser, loginDemoUser, checkAccountExists } from '../utils/authStorage';
 import { JOB_ROLES } from '../data/jobRoles';
 
 interface AuthModalProps {
@@ -42,9 +42,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accountExistsNotice, setAccountExistsNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   if (!mode) return null;
+
+  // Real-time check if an account already exists while typing in the registration form
+  const existingCheck = !isLogin ? checkAccountExists(email, name) : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,9 +80,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         const res = registerUser(name, email, password, targetRole);
         setIsLoading(false);
+
         if (res.success && res.user) {
           onSuccess(res.user);
           onClose();
+        } else if (res.alreadyExists && res.existingUser) {
+          // User already created this account! Automatically show the login form
+          setEmail(res.existingUser.email);
+          setPassword('');
+          setConfirmPassword('');
+          setError(null);
+          setAccountExistsNotice(
+            `You already created an account with ${res.existingUser.email}! Please enter your password to log in.`
+          );
+          onSwitchMode('login');
         } else {
           setError(res.error || 'Failed to register account.');
         }
@@ -88,6 +103,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handle1ClickDemo = () => {
     setError(null);
+    setAccountExistsNotice(null);
     setIsLoading(true);
     setTimeout(() => {
       const demo = loginDemoUser();
@@ -103,12 +119,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setPassword('password123');
     } else {
       setName('Alex Rivera');
-      setEmail(`alex.${Math.floor(Math.random() * 899 + 100)}@example.com`);
+      setEmail('alex.rivera@example.com');
       setPassword('securePass123');
       setConfirmPassword('securePass123');
       setTargetRole('Fullstack Engineer');
     }
     setError(null);
+    setAccountExistsNotice(null);
   };
 
   return (
@@ -181,6 +198,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               type="button"
               onClick={() => {
                 setError(null);
+                setAccountExistsNotice(null);
                 onSwitchMode('register');
               }}
               className={`py-2 rounded-lg transition-all cursor-pointer ${
@@ -196,6 +214,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 sm:p-7 space-y-5">
+          {/* Account Exists Redirect Notice */}
+          {accountExistsNotice && isLogin && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className="p-3.5 bg-amber-50 border border-amber-300/80 rounded-2xl flex items-start gap-3 text-amber-950 text-xs shadow-xs"
+              id="account-already-exists-notice"
+            >
+              <div className="w-8 h-8 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0 mt-0.5">
+                <AlertCircle className="w-4 h-4" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-amber-950 text-sm">Account Already Exists</p>
+                <p className="mt-0.5 text-amber-800 leading-relaxed font-medium">
+                  {accountExistsNotice}
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {/* Quick 1-Click Demo Shortcut */}
           <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -244,7 +282,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       type="text"
                       required
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => {
+                        setName(e.target.value);
+                        if (error) setError(null);
+                      }}
                       placeholder="e.g. Alex Chen"
                       className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                     />
@@ -283,11 +324,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   type="email"
                   required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (error) setError(null);
+                  }}
                   placeholder="name@example.com"
                   className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                 />
               </div>
+
+              {/* Inline helper if email is already registered during registration */}
+              {existingCheck?.exists && !isLogin && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-2 text-xs text-amber-900"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span className="truncate">
+                      Account already exists for <strong>{existingCheck.user?.email}</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail(existingCheck.user?.email || email);
+                      setError(null);
+                      setAccountExistsNotice(
+                        `You already created an account for ${existingCheck.user?.email}! Please enter your password to sign in.`
+                      );
+                      onSwitchMode('login');
+                    }}
+                    className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-[11px] shrink-0 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    Log In
+                  </button>
+                </motion.div>
+              )}
             </div>
 
             {/* Password */}

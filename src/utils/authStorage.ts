@@ -61,12 +61,73 @@ export function setCurrentUser(user: UserProfile | null): void {
   }
 }
 
+export interface RegisterResult {
+  success: boolean;
+  error?: string;
+  user?: UserProfile;
+  alreadyExists?: boolean;
+  existingUser?: UserProfile;
+}
+
+export function checkAccountExists(
+  email: string,
+  name?: string
+): {
+  exists: boolean;
+  user?: UserProfile;
+  by: 'email' | 'name';
+} {
+  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedName = name ? name.trim().toLowerCase() : '';
+  if (!trimmedEmail && !trimmedName) return { exists: false, by: 'email' };
+
+  const users = getStoredUsers();
+
+  // Check email if provided
+  if (trimmedEmail) {
+    const byEmail = users.find((u) => u.email.trim().toLowerCase() === trimmedEmail);
+    if (byEmail) {
+      return {
+        exists: true,
+        by: 'email',
+        user: {
+          id: byEmail.id,
+          name: byEmail.name,
+          email: byEmail.email,
+          targetRole: byEmail.targetRole,
+          createdAt: byEmail.createdAt,
+        },
+      };
+    }
+  }
+
+  // Check name if query is at least 3 characters
+  if (trimmedName && trimmedName.length >= 3) {
+    const byName = users.find((u) => u.name.trim().toLowerCase() === trimmedName);
+    if (byName) {
+      return {
+        exists: true,
+        by: 'name',
+        user: {
+          id: byName.id,
+          name: byName.name,
+          email: byName.email,
+          targetRole: byName.targetRole,
+          createdAt: byName.createdAt,
+        },
+      };
+    }
+  }
+
+  return { exists: false, by: 'email' };
+}
+
 export function registerUser(
   name: string,
   email: string,
   password: string,
   targetRole?: string
-): { success: boolean; error?: string; user?: UserProfile } {
+): RegisterResult {
   const trimmedName = name.trim();
   const trimmedEmail = email.trim().toLowerCase();
 
@@ -84,10 +145,41 @@ export function registerUser(
   }
 
   const users = getStoredUsers();
-  const existingUser = users.find((u) => u.email.toLowerCase() === trimmedEmail);
+  
+  // 1. Check if an account already exists with this exact email
+  const existingByEmail = users.find((u) => u.email.trim().toLowerCase() === trimmedEmail);
+  if (existingByEmail) {
+    return {
+      success: false,
+      alreadyExists: true,
+      existingUser: {
+        id: existingByEmail.id,
+        name: existingByEmail.name,
+        email: existingByEmail.email,
+        targetRole: existingByEmail.targetRole,
+        createdAt: existingByEmail.createdAt,
+      },
+      error: `You already created an account with ${existingByEmail.email}! Please log in.`,
+    };
+  }
 
-  if (existingUser) {
-    return { success: false, error: 'An account with this email already exists. Please log in.' };
+  // 2. Check if an account already exists with this exact name
+  const existingByName = users.find(
+    (u) => u.name.trim().toLowerCase() === trimmedName.toLowerCase()
+  );
+  if (existingByName) {
+    return {
+      success: false,
+      alreadyExists: true,
+      existingUser: {
+        id: existingByName.id,
+        name: existingByName.name,
+        email: existingByName.email,
+        targetRole: existingByName.targetRole,
+        createdAt: existingByName.createdAt,
+      },
+      error: `An account for "${existingByName.name}" already exists (${existingByName.email}). Please log in.`,
+    };
   }
 
   const newUser: StoredUser = {
